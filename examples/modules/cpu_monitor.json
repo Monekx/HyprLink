@@ -1,0 +1,7 @@
+{
+  "id": "cpu_usage",
+  "type": "display",
+  "label": "Загрузка CPU (%)",
+  "source": "top -bn1 | grep 'Cpu(s)' | awk '{print $2}'",
+  "update_interval": "5s"
+}

@@ -1,0 +1,5 @@
+{
+  "hostname": "Arch-HyprStation",
+  "pin": "1337",
+  "modules": ["volume_control", "cpu_monitor", "ram_monitor", "hypr_actions", "system_power"]
+}

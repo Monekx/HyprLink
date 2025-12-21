@@ -1,0 +1,6 @@
+{
+  "id": "sys_reboot",
+  "type": "button",
+  "label": "Перезагрузка",
+  "action": "reboot"
+}

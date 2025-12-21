@@ -1,0 +1,63 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"net"
+	"sync"
+
+	"github.com/Monekx/hyprlink/internal/config"
+	"github.com/Monekx/hyprlink/internal/server"
+)
+
+func main() {
+	mode := flag.String("mode", "serve", "serve | build | get")
+	port := flag.Int("port", 8080, "TCP Port")
+	target := flag.String("target", "screenshot", "Target for get mode")
+	flag.Parse()
+
+	switch *mode {
+	case "serve":
+		var mu sync.RWMutex
+		fullCfg, err := config.BuildFullConfig("./examples")
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		config.WatchConfig("./examples", func() {
+			newCfg, err := config.BuildFullConfig("./examples")
+			if err == nil {
+				mu.Lock()
+				fullCfg = newCfg
+				mu.Unlock()
+				fmt.Printf("Config reloaded, new hash: %s\n", fullCfg.UI.Hash)
+				server.BroadcastUpdate(fullCfg.UI)
+			}
+		})
+
+		fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
+		go server.StartDiscovery(fullCfg.UI.Hostname, *port)
+		server.StartTCPServer(*port, fullCfg.UI, "1337", fullCfg.Actions)
+
+	case "get":
+		// Клиентский режим для CLI команд
+		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", *port))
+		if err != nil {
+			log.Fatal("Is hyprlink serve running?")
+		}
+		defer conn.Close()
+
+		// Шлем запрос демону, который перенаправит его на телефон
+		req := map[string]string{
+			"type": "get_request",
+			"id":   *target,
+			"pin":  "1337",
+		}
+		json.NewEncoder(conn).Encode(req)
+
+		fmt.Printf("Request sent: %s\n", *target)
+		// Здесь можно добавить ожидание ответа и вывод в stdout
+	}
+}
