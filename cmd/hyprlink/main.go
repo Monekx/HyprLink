@@ -7,12 +7,37 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 
 	"github.com/Monekx/hyprlink/internal/config"
 	"github.com/Monekx/hyprlink/internal/server"
 )
+
+func setupDefaultConfig(configDir string) {
+	// Если main.json уже есть, значит конфиг настроен
+	if _, err := os.Stat(filepath.Join(configDir, "main.json")); err == nil {
+		return
+	}
+
+	systemDefaults := "/usr/share/hyprlink/examples"
+
+	// Проверяем, существуют ли системные шаблоны (установленные через PKGBUILD)
+	if _, err := os.Stat(systemDefaults); os.IsNotExist(err) {
+		fmt.Printf("System defaults not found at %s. Please create config manually.\n", systemDefaults)
+		return
+	}
+
+	fmt.Printf("Initial setup: copying default config from %s to %s\n", systemDefaults, configDir)
+
+	// Используем системную команду cp для рекурсивного копирования содержимого
+	// Символы "/." копируют содержимое папки, а не саму папку
+	err := exec.Command("cp", "-r", systemDefaults+"/.", configDir).Run()
+	if err != nil {
+		fmt.Printf("Error copying default config: %v\n", err)
+	}
+}
 
 func main() {
 	mode := flag.String("mode", "serve", "serve | build | get")
@@ -24,7 +49,6 @@ func main() {
 	case "serve":
 		var mu sync.RWMutex
 
-		// Получаем путь к ~/.config/hyprlink
 		home, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatal(err)
@@ -32,15 +56,14 @@ func main() {
 		configDir := filepath.Join(home, ".config", "hyprlink")
 
 		// Создаем директорию, если её нет
-		if _, err := os.Stat(configDir); os.IsNotExist(err) {
-			fmt.Printf("Config directory not found, creating: %s\n", configDir)
-			os.MkdirAll(configDir, 0755)
-			// Здесь можно добавить логику копирования дефолтных файлов из /usr/share/hyprlink
-		}
+		os.MkdirAll(configDir, 0755)
+
+		// Копируем дефолтные файлы, если это первый запуск
+		setupDefaultConfig(configDir)
 
 		fullCfg, err := config.BuildFullConfig(configDir)
 		if err != nil {
-			log.Fatal("Error loading config from ", configDir, ": ", err)
+			log.Fatal(err)
 		}
 
 		config.WatchConfig(configDir, func() {
