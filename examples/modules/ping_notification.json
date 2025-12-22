@@ -1,0 +1,6 @@
+{
+    "id": "ping_notification",
+    "type": "button",
+    "label": "Пинг",
+    "action": "notify-send 'HyprLink' 'Понг!' -u normal"
+}

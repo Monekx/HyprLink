@@ -1,0 +1,25 @@
+{
+  "id": "media_row",
+  "type": "row",
+  "label": "Управление плеером",
+  "children": [
+    {
+      "id": "prev",
+      "type": "button",
+      "icon": "<",
+      "action": "playerctl previous"
+    },
+    {
+      "id": "play",
+      "type": "button",
+      "icon": "II",
+      "action": "playerctl play-pause"
+    },
+    {
+      "id": "next",
+      "type": "button",
+      "icon": ">",
+      "action": "playerctl next"
+    }
+  ]
+}
