@@ -33,23 +33,27 @@ func main() {
 				fullCfg = newCfg
 				mu.Unlock()
 				fmt.Printf("Config reloaded, new hash: %s\n", fullCfg.UI.Hash)
+				server.UpdateConfig(fullCfg.UI, fullCfg.Actions)
 				server.BroadcastUpdate(fullCfg.UI)
 			}
 		})
 
 		fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
+
+		// Запуск UDP Discovery для автопоиска в сети
 		go server.StartDiscovery(fullCfg.UI.Hostname, *port)
-		server.StartTCPServer(*port, fullCfg.UI, "1337", fullCfg.Actions)
+
+		// TCP сервер запускается и блокирует поток, внутри него уже запущены
+		// циклы обновления модулей, буфера обмена и теперь медиа-статуса
+		server.StartTCPServer(*port, fullCfg.UI, fullCfg.Actions)
 
 	case "get":
-		// Клиентский режим для CLI команд
 		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", *port))
 		if err != nil {
 			log.Fatal("Is hyprlink serve running?")
 		}
 		defer conn.Close()
 
-		// Шлем запрос демону, который перенаправит его на телефон
 		req := map[string]string{
 			"type": "get_request",
 			"id":   *target,
@@ -58,6 +62,5 @@ func main() {
 		json.NewEncoder(conn).Encode(req)
 
 		fmt.Printf("Request sent: %s\n", *target)
-		// Здесь можно добавить ожидание ответа и вывод в stdout
 	}
 }

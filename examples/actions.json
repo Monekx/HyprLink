@@ -1,1 +1,10 @@
-{}
+{
+  "next": "playerctl next",
+  "play": "playerctl play-pause",
+  "prev": "playerctl previous",
+  "sys_dim_display_minus": "brightnessctl set 5%-",
+  "sys_dim_display_plus": "brightnessctl set 5%+",
+  "sys_reboot": "reboot",
+  "sys_shutdown": "shutdown now",
+  "vol_1": "wpctl set-volume @DEFAULT_AUDIO_SINK@ {v}%"
+}

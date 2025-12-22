@@ -26,30 +26,39 @@ func BuildFullConfig(basePath string) (*FullConfig, error) {
 
 	ui := &UIConfig{
 		Hostname: main.Hostname,
-		Modules:  []Module{},
+		Profiles: []Tab{},
 	}
 	actions := make(map[string]string)
 
 	cssData, _ := os.ReadFile(filepath.Join(basePath, "style.css"))
 	ui.CSS = string(cssData)
 
-	for _, modName := range main.Modules {
-		modPath := filepath.Join(basePath, "modules", modName+".json")
-		modData, err := os.ReadFile(modPath)
-		if err != nil {
-			continue
+	for _, p := range main.Profiles {
+		tab := Tab{Name: p.Name, Modules: []Module{}}
+		for _, modName := range p.Modules {
+			modPath := filepath.Join(basePath, "modules", modName+".json")
+			modData, err := os.ReadFile(modPath)
+			if err != nil {
+				continue
+			}
+
+			var mod Module
+			if err := json.Unmarshal(modData, &mod); err == nil {
+				extractActions(mod, actions)
+				tab.Modules = append(tab.Modules, mod)
+			}
 		}
-
-		var mod Module
-		json.Unmarshal(modData, &mod)
-
-		extractActions(mod, actions)
-		ui.Modules = append(ui.Modules, mod)
+		ui.Profiles = append(ui.Profiles, tab)
 	}
 
 	uiBytes, _ := json.Marshal(ui)
 	hash := sha256.Sum256(uiBytes)
 	ui.Hash = hex.EncodeToString(hash[:])
+
+	// После сборки всех профилей и извлечения действий:
+	actionsPath := filepath.Join(basePath, "actions.json")
+	actionsData, _ := json.MarshalIndent(actions, "", "  ")
+	os.WriteFile(actionsPath, actionsData, 0644) // Записываем карту в отдельный файл
 
 	return &FullConfig{UI: ui, Actions: actions}, nil
 }

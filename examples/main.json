@@ -1,5 +1,13 @@
 {
-  "hostname": "Arch-HyprStation",
-  "pin": "1337",
-  "modules": ["volume_control", "cpu_monitor", "ram_monitor", "hypr_actions", "system_power"]
+  "hostname": "Arch-Master",
+  "profiles": [
+    {
+      "name": "Система",
+      "modules": ["cpu_monitor", "power_controls"]
+    },
+    {
+      "name": "Медиа",
+      "modules": ["volume", "playback_controls"]
+    }
+  ]
 }
