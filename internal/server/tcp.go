@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -53,16 +52,16 @@ var (
 	configMu       sync.RWMutex
 	currentConfig  *config.UIConfig
 	currentActions map[string]string
+
+	getChan = make(chan map[string]interface{}, 10)
 )
 
 func generateAndNotifyPin() string {
 	pinMutex.Lock()
 	defer pinMutex.Unlock()
-
 	currentPin = fmt.Sprintf("%04d", time.Now().UnixNano()%10000)
 	exec.Command("notify-send", "-a", "HyprLink", "Запрос подключения",
 		fmt.Sprintf("Введите PIN-код на устройстве: %s", currentPin)).Run()
-
 	return currentPin
 }
 
@@ -75,17 +74,14 @@ func UpdateConfig(cfg *config.UIConfig, actions map[string]string) {
 
 func StartTCPServer(port int, cfg *config.UIConfig, actions map[string]string) {
 	UpdateConfig(cfg, actions)
-
 	lc := net.ListenConfig{KeepAlive: 10 * time.Second}
 	ln, err := lc.Listen(context.Background(), "tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return
 	}
-
 	go startUpdateLoop()
 	go watchClipboard()
-	go watchMediaStatus() // Фоновый мониторинг плеера
-
+	go watchMediaStatus()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
@@ -96,34 +92,28 @@ func StartTCPServer(port int, cfg *config.UIConfig, actions map[string]string) {
 }
 
 func handleSession(conn net.Conn) {
-	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
-
-	conn.SetReadDeadline(time.Now().Add(15 * time.Second))
-	var req Request
-	if err := decoder.Decode(&req); err != nil {
+	var firstReq Request
+	if err := decoder.Decode(&firstReq); err != nil {
 		conn.Close()
 		return
 	}
 
-	// Получаем домашнюю директорию пользователя динамически
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Fatal(err)
+	if firstReq.Type == "get_request" {
+		handleGetRequest(conn, firstReq)
+		return
 	}
 
-	// Формируем полный путь
+	encoder := json.NewEncoder(conn)
+	home, _ := os.UserHomeDir()
 	trustedPath := filepath.Join(home, ".config", "hyprlink", "trusted_devices.json")
-
-	// Гарантируем, что папка существует
 	os.MkdirAll(filepath.Dir(trustedPath), 0755)
 	trustedDevices, _ := config.LoadTrustedDevices(trustedPath)
 
 	isAuthorized := false
 	var newID, newToken string
-
-	if req.DeviceID != "" && req.Token != "" {
-		if dev, ok := trustedDevices[req.DeviceID]; ok && dev.Token == req.Token {
+	if firstReq.DeviceID != "" && firstReq.Token != "" {
+		if dev, ok := trustedDevices[firstReq.DeviceID]; ok && dev.Token == firstReq.Token {
 			isAuthorized = true
 		}
 	}
@@ -131,15 +121,12 @@ func handleSession(conn net.Conn) {
 	if !isAuthorized {
 		pin := generateAndNotifyPin()
 		encoder.Encode(Response{Status: "unauthorized", Message: "PIN_REQUIRED"})
-
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
-
 		var authReq Request
 		if err := decoder.Decode(&authReq); err != nil {
 			conn.Close()
 			return
 		}
-
 		if authReq.Pin == pin && pin != "" {
 			isAuthorized = true
 			newID = "phone-" + config.GenerateToken()[:8]
@@ -157,12 +144,10 @@ func handleSession(conn net.Conn) {
 	}
 
 	conn.SetReadDeadline(time.Time{})
-
 	mu.Lock()
 	clients[conn] = encoder
 	mu.Unlock()
 
-	// При подключении сразу отправляем текущий статус медиа
 	go broadcastMediaStatus()
 
 	defer func() {
@@ -177,32 +162,91 @@ func handleSession(conn net.Conn) {
 	configMu.RUnlock()
 
 	resp := Response{Status: "ok", DeviceID: newID, Token: newToken}
-	if req.Hash != cfg.Hash {
+	if firstReq.Hash != cfg.Hash {
 		resp.Status = "update"
 		resp.Config = cfg
 	}
 	encoder.Encode(resp)
 
 	for {
-		var action Request
-		if err := decoder.Decode(&action); err != nil {
+		var raw json.RawMessage
+		if err := decoder.Decode(&raw); err != nil {
 			return
 		}
-		switch action.Type {
-		case "action":
-			go handleAction(action.ID, action.Value)
-		case "clipboard":
-			clean := strings.TrimSpace(action.Content)
-			if clean != "" {
-				go exec.Command("bash", "-c", fmt.Sprintf("echo -n %q | wl-copy", clean)).Run()
-			}
-		case "notification":
-			go func(a, t, c string) {
-				exec.Command("notify-send", "-a", a, t, c).Run()
-			}(action.App, action.Title, action.Content)
-		case "ping":
+
+		var data map[string]interface{}
+		if err := json.Unmarshal(raw, &data); err != nil {
+			continue
 		}
+
+		t, _ := data["type"].(string)
+		if t == "sys_info" {
+			fmt.Println("DEBUG: Received sys_info from phone")
+			select {
+			case getChan <- data:
+			default:
+				fmt.Println("DEBUG: getChan is full, skipping")
+			}
+			continue
+		}
+
+		handleIncomingMap(data)
 	}
+}
+
+func handleIncomingMap(data map[string]interface{}) {
+	t, _ := data["type"].(string)
+	switch t {
+	case "action":
+		id, _ := data["id"].(string)
+		val, _ := data["value"].(float64)
+		go handleAction(id, val)
+	case "clipboard":
+		content, _ := data["content"].(string)
+		if clean := strings.TrimSpace(content); clean != "" {
+			go exec.Command("bash", "-c", fmt.Sprintf("echo -n %q | wl-copy", clean)).Run()
+		}
+	case "notification":
+		app, _ := data["app"].(string)
+		title, _ := data["title"].(string)
+		content, _ := data["content"].(string)
+		go exec.Command("notify-send", "-a", app, title, content).Run()
+	case "ping":
+		// Просто игнорируем пинг
+	}
+}
+
+func handleGetRequest(conn net.Conn, req Request) {
+	mu.Lock()
+	var phoneEncoder *json.Encoder
+	for _, enc := range clients {
+		phoneEncoder = enc
+		break
+	}
+	mu.Unlock()
+
+	if phoneEncoder == nil {
+		json.NewEncoder(conn).Encode(map[string]string{"error": "No devices connected"})
+		conn.Close()
+		return
+	}
+
+	for len(getChan) > 0 {
+		<-getChan
+	}
+
+	fmt.Println("DEBUG: Sending get_request to phone...")
+	phoneEncoder.Encode(req)
+
+	select {
+	case stats := <-getChan:
+		fmt.Println("DEBUG: Forwarding stats to CLI")
+		json.NewEncoder(conn).Encode(stats)
+	case <-time.After(7 * time.Second):
+		fmt.Println("DEBUG: Timeout reached")
+		json.NewEncoder(conn).Encode(map[string]string{"error": "Timeout waiting for phone"})
+	}
+	conn.Close()
 }
 
 func handleAction(actionID string, actionValue float64) {
@@ -224,16 +268,13 @@ func handleAction(actionID string, actionValue float64) {
 		broadcastMediaStatus()
 		return
 	case "media_seek":
-		// playerctl принимает значение в секундах
 		exec.Command("playerctl", "position", fmt.Sprintf("%f", actionValue)).Run()
 		broadcastMediaStatus()
 		return
 	}
-
 	configMu.RLock()
 	actions := currentActions
 	configMu.RUnlock()
-
 	if cmdStr, ok := actions[actionID]; ok {
 		valStr := fmt.Sprintf("%.0f", actionValue)
 		finalCmd := strings.ReplaceAll(cmdStr, "{v}", valStr)
@@ -245,35 +286,27 @@ func broadcastMediaStatus() {
 	title, _ := exec.Command("playerctl", "metadata", "title").Output()
 	artist, _ := exec.Command("playerctl", "metadata", "artist").Output()
 	status, _ := exec.Command("playerctl", "status").Output()
-
 	posRaw, _ := exec.Command("playerctl", "position").Output()
 	durRaw, _ := exec.Command("playerctl", "metadata", "mpris:length").Output()
-
 	t := strings.TrimSpace(string(title))
 	a := strings.TrimSpace(string(artist))
 	s := strings.ToLower(strings.TrimSpace(string(status)))
-
-	// playerctl position возвращает секунды (float) -> в мс
 	posFloat, _ := strconv.ParseFloat(strings.TrimSpace(string(posRaw)), 64)
 	posMs := int64(posFloat * 1000)
-
-	// mpris:length обычно в микросекундах -> в мс
 	durUs, _ := strconv.ParseInt(strings.TrimSpace(string(durRaw)), 10, 64)
 	durMs := durUs / 1000
-
 	if t == "" {
 		t = "Ничего не воспроизводится"
 		posMs = 0
 		durMs = 0
 	}
-
 	broadcastUpdate(Response{
 		Type:     "media_info",
 		Content:  t,
 		App:      a,
 		Status:   s,
-		Value:    float64(posMs), // Текущая позиция в мс
-		Duration: durMs,          // Длительность в мс
+		Value:    float64(posMs),
+		Duration: durMs,
 	})
 }
 
@@ -297,7 +330,6 @@ func startUpdateLoop() {
 		configMu.RLock()
 		cfg := currentConfig
 		configMu.RUnlock()
-
 		if cfg != nil {
 			for _, profile := range cfg.Profiles {
 				scanModules(profile.Modules)
@@ -344,7 +376,7 @@ func watchClipboard() {
 func watchMediaStatus() {
 	for {
 		broadcastMediaStatus()
-		time.Sleep(1 * time.Second) // Раз в секунду достаточно, Android сам интерполирует
+		time.Sleep(1 * time.Second)
 	}
 }
 
