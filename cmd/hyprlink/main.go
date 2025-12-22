@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/Monekx/hyprlink/internal/config"
@@ -21,13 +23,28 @@ func main() {
 	switch *mode {
 	case "serve":
 		var mu sync.RWMutex
-		fullCfg, err := config.BuildFullConfig("./examples")
+
+		// Получаем путь к ~/.config/hyprlink
+		home, err := os.UserHomeDir()
 		if err != nil {
 			log.Fatal(err)
 		}
+		configDir := filepath.Join(home, ".config", "hyprlink")
 
-		config.WatchConfig("./examples", func() {
-			newCfg, err := config.BuildFullConfig("./examples")
+		// Создаем директорию, если её нет
+		if _, err := os.Stat(configDir); os.IsNotExist(err) {
+			fmt.Printf("Config directory not found, creating: %s\n", configDir)
+			os.MkdirAll(configDir, 0755)
+			// Здесь можно добавить логику копирования дефолтных файлов из /usr/share/hyprlink
+		}
+
+		fullCfg, err := config.BuildFullConfig(configDir)
+		if err != nil {
+			log.Fatal("Error loading config from ", configDir, ": ", err)
+		}
+
+		config.WatchConfig(configDir, func() {
+			newCfg, err := config.BuildFullConfig(configDir)
 			if err == nil {
 				mu.Lock()
 				fullCfg = newCfg
@@ -39,14 +56,8 @@ func main() {
 		})
 
 		fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
-
-		// Запуск UDP Discovery для автопоиска в сети
 		go server.StartDiscovery(fullCfg.UI.Hostname, *port)
-
-		// TCP сервер запускается и блокирует поток, внутри него уже запущены
-		// циклы обновления модулей, буфера обмена и теперь медиа-статуса
 		server.StartTCPServer(*port, fullCfg.UI, fullCfg.Actions)
-
 	case "get":
 		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", *port))
 		if err != nil {
