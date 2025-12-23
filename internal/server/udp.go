@@ -4,37 +4,42 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"time"
 )
 
+// Beacon структура теперь используется для десериализации данных от Android
 type Beacon struct {
 	Hostname string `json:"hostname"`
 	Port     int    `json:"port"`
 }
 
-func StartDiscovery(hostname string, port int) {
-	// Используем порт 9999
-	addr, err := net.ResolveUDPAddr("udp", "255.255.255.255:9999")
+func ListenForDevices(tcpPort int) {
+	addr, err := net.ResolveUDPAddr("udp", ":9999")
 	if err != nil {
-		fmt.Printf("UDP Error: %v\n", err)
 		return
 	}
 
-	conn, err := net.ListenUDP("udp", nil)
+	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
-		fmt.Printf("UDP Listen Error: %v\n", err)
 		return
 	}
 	defer conn.Close()
 
-	msg, _ := json.Marshal(Beacon{Hostname: hostname, Port: port})
-
-	fmt.Println("UDP Discovery beacon started...")
+	buf := make([]byte, 1024)
 	for {
-		_, err := conn.WriteToUDP(msg, addr)
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			fmt.Printf("UDP Write Error: %v\n", err)
+			continue
 		}
-		time.Sleep(2 * time.Second) // Уменьшим интервал до 2 секунд для быстрого поиска
+
+		var beacon Beacon
+		if err := json.Unmarshal(buf[:n], &beacon); err != nil {
+			continue
+		}
+
+		// Отправляем HYPRLINK_ACK и порт, на котором висит TCP сервер
+		ack := []byte(fmt.Sprintf("HYPRLINK_ACK|%d", tcpPort))
+		conn.WriteToUDP(ack, remoteAddr)
+
+		fmt.Printf("Device %s found at %s. Ack sent.\n", beacon.Hostname, remoteAddr.IP.String())
 	}
 }

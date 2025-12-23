@@ -69,7 +69,7 @@ func main() {
 		})
 
 		fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
-		go server.StartDiscovery(fullCfg.UI.Hostname, *port)
+		go server.ListenForDevices(*port)
 		server.StartTCPServer(*port, fullCfg.UI, fullCfg.Actions)
 
 	case "get":
