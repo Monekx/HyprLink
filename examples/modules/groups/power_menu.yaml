@@ -1,0 +1,17 @@
+type: row
+label: Power Options
+children:
+  - type: button
+    icon: "🔒"
+    label: Lock
+    action: loginctl lock-session
+
+  - type: button
+    icon: "🔄"
+    label: Reboot
+    action: systemctl reboot
+
+  - type: button
+    icon: "⏻"
+    label: Off
+    action: systemctl poweroff

@@ -1,0 +1,14 @@
+type: row
+label: Now Playing
+children:
+  - type: button
+    icon: "⏮"
+    action: playerctl previous
+  
+  - type: button
+    icon: "⏯"
+    action: playerctl play-pause
+  
+  - type: button
+    icon: "⏭"
+    action: playerctl next

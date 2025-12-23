@@ -1,0 +1,4 @@
+type: display
+id: clock_widget
+label: Time
+source: date +%H:%M

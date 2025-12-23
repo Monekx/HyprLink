@@ -1,0 +1,4 @@
+name: Media Control
+modules:
+  - modules/groups/media_player.yaml
+  - modules/widgets/master_volume.yaml

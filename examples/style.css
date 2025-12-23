@@ -1,5 +1,33 @@
-background: #1a1b26;
-card-color: #24283b;
-accent: #7aa2f7;
-text-color: #c0caf5;
-border-radius: 20px;
+/* Глобальные переменные и стили */
+* {
+    background: #1a1b26;        /* Цвет фона всего экрана */
+    text-color: #c0caf5;        /* Основной цвет текста */
+    accent: #7aa2f7;            /* Акцентный цвет (голубой) */
+    card-bg: #24283b;           /* Фон карточек/виджетов */
+    card-radius: 16;            /* Закругление углов */
+    card-shadow: 4;             /* Тень */
+    font-family: "JetBrains Mono", monospace;
+}
+
+/* Стили для рядов (групп) */
+module-row {
+    background: transparent;    /* Ряды прозрачные */
+    padding: 0;
+    margin: 4;
+}
+
+/* Стили кнопок */
+module-button {
+    button-bg: #414868;
+    button-color: #7aa2f7;
+}
+
+/* Слайдеры */
+module-slider {
+    slider-active-color: #bb9af7;
+    slider-track-color: #292e42;
+}
+
+/* Текстовые панели */
+display-value-color: #9ece6a;   /* Зеленый для значений */
+display-label-color: #565f89;   /* Серый для подписей */

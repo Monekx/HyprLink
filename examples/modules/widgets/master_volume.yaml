@@ -1,0 +1,7 @@
+type: slider
+id: volume_master
+label: System Volume
+# Команда для получения текущего уровня громкости (0-100)
+source: wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print $2 * 100}'
+# Команда для установки громкости, {v} будет заменено на значение слайдера
+action: wpctl set-volume @DEFAULT_AUDIO_SINK@ {v}%

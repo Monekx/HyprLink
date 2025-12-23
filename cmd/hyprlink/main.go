@@ -16,20 +16,47 @@ import (
 )
 
 func setupDefaultConfig(configDir string) {
+	// 1. Если конфиг уже существует (YAML или JSON), ничего не делаем
+	if _, err := os.Stat(filepath.Join(configDir, "main.yaml")); err == nil {
+		return
+	}
 	if _, err := os.Stat(filepath.Join(configDir, "main.json")); err == nil {
 		return
 	}
 
-	systemDefaults := "/usr/share/hyprlink/examples"
-	if _, err := os.Stat(systemDefaults); os.IsNotExist(err) {
-		fmt.Printf("System defaults not found at %s. Please create config manually.\n", systemDefaults)
+	// 2. Определяем список мест, где могут лежать примеры
+	// Порядок важен: сначала локальные (для разработки), потом системные
+	potentialPaths := []string{
+		"examples",                     // В текущей папке (корень проекта)
+		"../../examples",               // Если запускаем через go run cmd/hyprlink/main.go
+		"/usr/share/hyprlink/examples", // Установленный в систему пакет
+	}
+
+	var sourcePath string
+	for _, p := range potentialPaths {
+		// Проверяем, существует ли папка и есть ли в ней main.yaml
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			if _, err := os.Stat(filepath.Join(p, "main.yaml")); err == nil {
+				sourcePath = p
+				break
+			}
+		}
+	}
+
+	if sourcePath == "" {
+		fmt.Println("Warning: No default configuration (examples) found. Checked local and system paths.")
+		fmt.Println("Please create ~/.config/hyprlink/main.yaml manually.")
 		return
 	}
 
-	fmt.Printf("Initial setup: copying default config from %s to %s\n", systemDefaults, configDir)
-	err := exec.Command("cp", "-r", systemDefaults+"/.", configDir).Run()
+	fmt.Printf("Initial setup: copying default config from %s to %s\n", sourcePath, configDir)
+
+	// Используем cp -r для рекурсивного копирования (важно для папки modules)
+	// Добавляем /. в конце sourcePath, чтобы скопировать содержимое папки, а не саму папку examples
+	cmd := exec.Command("cp", "-r", sourcePath+"/.", configDir)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		fmt.Printf("Error copying default config: %v\n", err)
+		fmt.Printf("Error copying default config: %v\nOutput: %s\n", err, string(output))
 	}
 }
 
@@ -53,9 +80,11 @@ func main() {
 
 		fullCfg, err := config.BuildFullConfig(configDir)
 		if err != nil {
-			log.Fatal(err)
+			// Если конфиг битый или его нет, не падаем сразу, а пробуем подождать
+			log.Printf("Error loading config: %v\n", err)
 		}
 
+		// Запускаем вотчер
 		config.WatchConfig(configDir, func() {
 			newCfg, err := config.BuildFullConfig(configDir)
 			if err == nil {
@@ -63,14 +92,24 @@ func main() {
 				fullCfg = newCfg
 				mu.Unlock()
 				fmt.Printf("Config reloaded, new hash: %s\n", fullCfg.UI.Hash)
-				server.UpdateConfig(fullCfg.UI, fullCfg.Actions)
-				server.BroadcastUpdate(fullCfg.UI)
+				server.UpdateConfig(&fullCfg.UI, fullCfg.Actions)
+				server.BroadcastUpdate(&fullCfg.UI)
+			} else {
+				fmt.Printf("Error reloading config: %v\n", err)
 			}
 		})
 
-		fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
+		if fullCfg != nil {
+			fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
+			server.UpdateConfig(&fullCfg.UI, fullCfg.Actions)
+		} else {
+			fmt.Println("HyprLink started without valid config. Waiting for changes...")
+			// Инициализируем пустыми значениями, чтобы сервер не упал
+			server.UpdateConfig(&config.UIConfig{}, make(map[string]string))
+		}
+
 		go server.ListenForDevices(*port)
-		server.StartTCPServer(*port, fullCfg.UI, fullCfg.Actions)
+		server.StartTCPServer(*port, &fullCfg.UI, fullCfg.Actions)
 
 	case "get":
 		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", *port))

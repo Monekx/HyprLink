@@ -1,0 +1,6 @@
+name: Dashboard
+modules:
+  - modules/widgets/clock.yaml
+  - modules/groups/system_stats.yaml
+  - modules/widgets/master_volume.yaml
+  - modules/groups/power_menu.yaml

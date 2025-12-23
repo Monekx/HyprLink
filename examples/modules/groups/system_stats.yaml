@@ -1,0 +1,4 @@
+type: row
+children:
+  - modules/widgets/cpu.yaml
+  - modules/widgets/ram.yaml

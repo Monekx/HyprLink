@@ -1,7 +1,0 @@
-{
-  "id": "vol_1",
-  "type": "slider",
-  "label": "Volume",
-  "action": "wpctl set-volume @DEFAULT_AUDIO_SINK@ {v}%",
-  "source": "wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{print $2*100}'"
-}

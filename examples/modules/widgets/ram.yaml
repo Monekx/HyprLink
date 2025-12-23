@@ -1,0 +1,5 @@
+type: display
+id: ram_usage
+label: RAM Free
+# Показываем свободную память в ГБ
+source: free -h | grep Mem | awk '{print $7}'

@@ -28,18 +28,16 @@ func WatchConfig(basePath string, onWrite func()) {
 					return
 				}
 
-				// Игнорируем actions.json и временные файлы
 				name := filepath.Base(event.Name)
-				if name == "actions.json" || strings.HasPrefix(name, ".") {
+				if name == "actions.json" || name == "actions.yaml" || strings.HasPrefix(name, ".") {
 					continue
 				}
 
-				if event.Has(fsnotify.Write) {
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) {
 					mu.Lock()
 					if timer != nil {
 						timer.Stop()
 					}
-					// Задержка 100мс, чтобы не перезагружать конфиг на каждое микро-изменение
 					timer = time.AfterFunc(100*time.Millisecond, func() {
 						onWrite()
 					})
@@ -54,10 +52,20 @@ func WatchConfig(basePath string, onWrite func()) {
 		}
 	}()
 
-	watcher.Add(basePath)
-	// Проверяем существование папки перед добавлением
-	modulesPath := filepath.Join(basePath, "modules")
-	if _, err := os.Stat(modulesPath); err == nil {
-		watcher.Add(modulesPath)
+	err = filepath.Walk(basePath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if strings.HasPrefix(info.Name(), ".") && info.Name() != "." {
+				return filepath.SkipDir
+			}
+			return watcher.Add(path)
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Printf("Error walking config directory: %v", err)
 	}
 }

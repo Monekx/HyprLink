@@ -1,7 +1,0 @@
-{
-  "id": "ram_usage",
-  "type": "display",
-  "label": "Занято RAM (MB)",
-  "source": "free -m | awk '/Mem:/ {print $3}'",
-  "update_interval": "2s"
-}

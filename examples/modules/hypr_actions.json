@@ -1,6 +1,0 @@
-{
-  "id": "hypr_1",
-  "type": "button",
-  "label": "Убить активное окно",
-  "action": "hyprctl dispatch killactive"
-}

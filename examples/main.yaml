@@ -1,0 +1,5 @@
+hostname: Arch Linux
+profiles:
+  # Профили подключаются как внешние файлы для чистоты
+  - modules/profiles/dashboard.yaml
+  - modules/profiles/media.yaml
