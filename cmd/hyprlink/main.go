@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,6 @@ import (
 )
 
 func setupDefaultConfig(configDir string) {
-	// 1. Если конфиг уже существует (YAML или JSON), ничего не делаем
 	if _, err := os.Stat(filepath.Join(configDir, "main.yaml")); err == nil {
 		return
 	}
@@ -24,17 +24,14 @@ func setupDefaultConfig(configDir string) {
 		return
 	}
 
-	// 2. Определяем список мест, где могут лежать примеры
-	// Порядок важен: сначала локальные (для разработки), потом системные
 	potentialPaths := []string{
-		"examples",                     // В текущей папке (корень проекта)
-		"../../examples",               // Если запускаем через go run cmd/hyprlink/main.go
-		"/usr/share/hyprlink/examples", // Установленный в систему пакет
+		"examples",
+		"../../examples",
+		"/usr/share/hyprlink/examples",
 	}
 
 	var sourcePath string
 	for _, p := range potentialPaths {
-		// Проверяем, существует ли папка и есть ли в ней main.yaml
 		if info, err := os.Stat(p); err == nil && info.IsDir() {
 			if _, err := os.Stat(filepath.Join(p, "main.yaml")); err == nil {
 				sourcePath = p
@@ -44,25 +41,17 @@ func setupDefaultConfig(configDir string) {
 	}
 
 	if sourcePath == "" {
-		fmt.Println("Warning: No default configuration (examples) found. Checked local and system paths.")
-		fmt.Println("Please create ~/.config/hyprlink/main.yaml manually.")
+		fmt.Println("Warning: No default configuration found.")
 		return
 	}
 
-	fmt.Printf("Initial setup: copying default config from %s to %s\n", sourcePath, configDir)
-
-	// Используем cp -r для рекурсивного копирования (важно для папки modules)
-	// Добавляем /. в конце sourcePath, чтобы скопировать содержимое папки, а не саму папку examples
-	cmd := exec.Command("cp", "-r", sourcePath+"/.", configDir)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("Error copying default config: %v\nOutput: %s\n", err, string(output))
-	}
+	fmt.Printf("Initial setup: copying config from %s to %s\n", sourcePath, configDir)
+	exec.Command("cp", "-r", sourcePath+"/.", configDir).Run()
 }
 
 func main() {
 	mode := flag.String("mode", "serve", "serve | build | get")
-	port := flag.Int("port", 8080, "TCP Port")
+	port := flag.Int("port", 8080, "Port")
 	target := flag.String("target", "all", "Target for get mode")
 	flag.Parse()
 
@@ -80,11 +69,10 @@ func main() {
 
 		fullCfg, err := config.BuildFullConfig(configDir)
 		if err != nil {
-			// Если конфиг битый или его нет, не падаем сразу, а пробуем подождать
 			log.Printf("Error loading config: %v\n", err)
 		}
 
-		// Запускаем вотчер
+		// Запускаем вотчер конфига
 		config.WatchConfig(configDir, func() {
 			newCfg, err := config.BuildFullConfig(configDir)
 			if err == nil {
@@ -103,33 +91,37 @@ func main() {
 			fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
 			server.UpdateConfig(&fullCfg.UI, fullCfg.Actions)
 		} else {
-			fmt.Println("HyprLink started without valid config. Waiting for changes...")
-			// Инициализируем пустыми значениями, чтобы сервер не упал
 			server.UpdateConfig(&config.UIConfig{}, make(map[string]string))
 		}
 
-		go server.ListenForDevices(*port)
-		server.StartTCPServer(*port, &fullCfg.UI, fullCfg.Actions)
+		// Запускаем UDP Discovery (если он нужен, раскомментируй)
+		// go server.ListenForDevices(*port)
+
+		// Запускаем WS сервер
+		server.StartServer(*port, &fullCfg.UI, fullCfg.Actions)
 
 	case "get":
-		conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", *port))
+		// Теперь get работает через HTTP API, так как сервер на WebSockets
+		url := fmt.Sprintf("http://localhost:%d/api/get?id=%s", *port, *target)
+		resp, err := http.Get(url)
 		if err != nil {
-			log.Fatal("Is hyprlink serve running?")
+			log.Fatalf("Failed to connect to hyprlink server: %v", err)
 		}
-		defer conn.Close()
+		defer resp.Body.Close()
 
-		req := map[string]string{
-			"type": "get_request",
-			"id":   *target,
-		}
-		json.NewEncoder(conn).Encode(req)
-
-		var response map[string]interface{}
-		if err := json.NewDecoder(conn).Decode(&response); err != nil {
-			log.Fatal("Error reading response: ", err)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Fatal("Error reading response:", err)
 		}
 
-		output, _ := json.MarshalIndent(response, "", "  ")
-		fmt.Println(string(output))
+		// Пытаемся отформатировать JSON красиво
+		var prettyJSON map[string]interface{}
+		if err := json.Unmarshal(body, &prettyJSON); err == nil {
+			output, _ := json.MarshalIndent(prettyJSON, "", "  ")
+			fmt.Println(string(output))
+		} else {
+			// Если не JSON (например ошибка 500 текстом)
+			fmt.Println(string(body))
+		}
 	}
 }
