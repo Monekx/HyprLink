@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -318,9 +319,53 @@ func handleIncomingMap(data map[string]interface{}) {
 			btn, _ := data["button"].(string)
 			input.Click(btn)
 		}
+
+	case "file":
+		fileName, _ := data["file_name"].(string)
+		fileData, _ := data["file_data"].(string)
+
+		if fileName != "" && fileData != "" {
+			go handleFileUpload(fileName, fileData)
+		}
+
 	case "ping":
 		// Pings обрабатываются на уровне протокола WS, но можно оставить
 	}
+}
+
+func handleFileUpload(name, b64data string) {
+	// 1. Декодируем Base64
+	data, err := base64.StdEncoding.DecodeString(b64data)
+	if err != nil {
+		log.Printf("Base64 decode error: %v", err)
+		return
+	}
+
+	// 2. Определяем путь (сохраняем в ~/Downloads/HyprLink/)
+	home, _ := os.UserHomeDir()
+	downloadDir := filepath.Join(home, "Downloads", "HyprLink")
+	os.MkdirAll(downloadDir, 0755)
+
+	filePath := filepath.Join(downloadDir, name)
+
+	// 3. Сохраняем файл
+	err = os.WriteFile(filePath, data, 0644)
+	if err != nil {
+		log.Printf("File save error: %v", err)
+		return
+	}
+	log.Printf("File saved: %s", filePath)
+
+	// 4. Уведомление
+	exec.Command("notify-send", "-a", "HyprLink", "Файл получен", fmt.Sprintf("Сохранен в: %s", filePath)).Run()
+
+	// 5. Копируем ПУТЬ к файлу в буфер обмена (MIME: text/uri-list)
+	// Это позволяет вставить файл (как файл) в Telegram, Discord, Dolphin и т.д.
+	// Формат URI: file:///home/user/Downloads/...
+	uri := fmt.Sprintf("file://%s", filePath)
+	cmd := exec.Command("wl-copy", "--type", "text/uri-list")
+	cmd.Stdin = strings.NewReader(uri)
+	cmd.Run()
 }
 
 func handleAction(actionID string, actionValue float64) {
