@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Monekx/hyprlink/internal/config"
+	"github.com/Monekx/hyprlink/internal/input"
 	"github.com/gorilla/websocket"
 )
 
@@ -54,7 +55,7 @@ var (
 	pinMutex   sync.Mutex
 
 	// Храним активные WS соединения
-	clients = make(map[*websocket.Conn]bool)
+	clients   = make(map[*websocket.Conn]bool)
 	clientsMu sync.Mutex
 
 	// Конфигурация
@@ -128,8 +129,8 @@ func handleWsConnection(w http.ResponseWriter, r *http.Request) {
 	home, _ := os.UserHomeDir()
 	trustedPath := filepath.Join(home, ".config", "hyprlink", "trusted_devices.json")
 	// Создаем папку если нет
-	os.MkdirAll(filepath.Dir(trustedPath), 0755) 
-	
+	os.MkdirAll(filepath.Dir(trustedPath), 0755)
+
 	trustedDevices, _ := config.LoadTrustedDevices(trustedPath)
 	isAuthorized := false
 	var newID, newToken string
@@ -148,8 +149,8 @@ func handleWsConnection(w http.ResponseWriter, r *http.Request) {
 		// Если PIN не прислан, генерируем его и просим клиента ввести
 		if req.Pin == "" {
 			pin := generateAndNotifyPin()
-			conn.WriteJSON(Response{Status: "unauthorized", Message: "PIN_REQUIRED"})
-			
+			conn.WriteJSON(Response{Status: "unauthorized", Type: "auth", Message: "PIN_REQUIRED"})
+
 			// Ждем ответа с PIN (с таймаутом)
 			conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 			var authReq Request
@@ -220,7 +221,7 @@ func handleWsConnection(w http.ResponseWriter, r *http.Request) {
 		}
 
 		t, _ := msg["type"].(string)
-		
+
 		// Обработка ответа на sys_info (для CLI)
 		if t == "sys_info" {
 			select {
@@ -259,7 +260,7 @@ func handleGetAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetID := r.URL.Query().Get("id")
-	
+
 	// Отправляем запрос на телефон через WS
 	req := Request{Type: "get_request", ID: targetID}
 	if err := activeConn.WriteJSON(req); err != nil {
@@ -305,6 +306,18 @@ func handleIncomingMap(data map[string]interface{}) {
 		title, _ := data["title"].(string)
 		content, _ := data["content"].(string)
 		go exec.Command("notify-send", "-a", app, title, content).Run()
+	case "mouse":
+		action, _ := data["action"].(string)
+
+		if action == "move" {
+			// Получаем смещение. JSON числа приходят как float64
+			dxVal, _ := data["dx"].(float64)
+			dyVal, _ := data["dy"].(float64)
+			input.Move(int32(dxVal), int32(dyVal))
+		} else if action == "click" {
+			btn, _ := data["button"].(string)
+			input.Click(btn)
+		}
 	case "ping":
 		// Pings обрабатываются на уровне протокола WS, но можно оставить
 	}
@@ -333,11 +346,11 @@ func handleAction(actionID string, actionValue float64) {
 		broadcastMediaStatus()
 		return
 	}
-	
+
 	configMu.RLock()
 	actions := currentActions
 	configMu.RUnlock()
-	
+
 	if cmdStr, ok := actions[actionID]; ok {
 		valStr := fmt.Sprintf("%.0f", actionValue)
 		finalCmd := strings.ReplaceAll(cmdStr, "{v}", valStr)
@@ -348,7 +361,7 @@ func handleAction(actionID string, actionValue float64) {
 func broadcastUpdate(resp Response) {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
-	
+
 	for conn := range clients {
 		if err := conn.WriteJSON(resp); err != nil {
 			log.Printf("Write error: %v", err)
@@ -426,23 +439,23 @@ func broadcastMediaStatus() {
 	status, _ := exec.Command("playerctl", "status").Output()
 	posRaw, _ := exec.Command("playerctl", "position").Output()
 	durRaw, _ := exec.Command("playerctl", "metadata", "mpris:length").Output()
-	
+
 	t := strings.TrimSpace(string(title))
 	a := strings.TrimSpace(string(artist))
 	s := strings.ToLower(strings.TrimSpace(string(status)))
-	
+
 	posFloat, _ := strconv.ParseFloat(strings.TrimSpace(string(posRaw)), 64)
 	posMs := int64(posFloat * 1000)
-	
+
 	durUs, _ := strconv.ParseInt(strings.TrimSpace(string(durRaw)), 10, 64)
 	durMs := durUs / 1000
-	
+
 	if t == "" {
 		t = "Ничего не воспроизводится"
 		posMs = 0
 		durMs = 0
 	}
-	
+
 	broadcastUpdate(Response{
 		Type:     "media_info",
 		Content:  t,

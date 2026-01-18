@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/Monekx/hyprlink/internal/config"
+	"github.com/Monekx/hyprlink/internal/input"
 	"github.com/Monekx/hyprlink/internal/server"
 )
 
@@ -86,6 +87,10 @@ func main() {
 				fmt.Printf("Error reloading config: %v\n", err)
 			}
 		})
+		if err := input.InitMouse(); err != nil {
+			log.Println("Warning: Mouse control will not work:", err)
+		}
+		defer input.Close()
 
 		if fullCfg != nil {
 			fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
@@ -95,7 +100,7 @@ func main() {
 		}
 
 		// Запускаем UDP Discovery (если он нужен, раскомментируй)
-		// go server.ListenForDevices(*port)
+		go server.ListenForDevices(*port)
 
 		// Запускаем WS сервер
 		server.StartServer(*port, &fullCfg.UI, fullCfg.Actions)
