@@ -87,10 +87,17 @@ func main() {
 				fmt.Printf("Error reloading config: %v\n", err)
 			}
 		})
+		// Инициализация uinput мыши
 		if err := input.InitMouse(); err != nil {
 			log.Println("Warning: Mouse control will not work:", err)
 		}
 		defer input.Close()
+
+		// НОВОЕ: Инициализация клавиатуры
+		if err := input.InitKeyboard(); err != nil {
+			log.Println("Warning: Keyboard control will not work:", err)
+		}
+		defer input.CloseKeyboard()
 
 		if fullCfg != nil {
 			fmt.Printf("HyprLink: %s (Hash: %s)\n", fullCfg.UI.Hostname, fullCfg.UI.Hash)
@@ -101,6 +108,9 @@ func main() {
 
 		// Запускаем UDP Discovery (если он нужен, раскомментируй)
 		go server.ListenForDevices(*port)
+
+		// Запуск сервера ввода
+		go server.StartInputServer("9998")
 
 		// Запускаем WS сервер
 		server.StartServer(*port, &fullCfg.UI, fullCfg.Actions)
